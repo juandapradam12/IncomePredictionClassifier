@@ -1,4 +1,4 @@
-"""Unit tests for from-scratch AdaBoost primitives and estimator."""
+"""Unit tests for AdaBoost, data loading, and analysis helpers."""
 
 from __future__ import annotations
 
@@ -23,7 +23,15 @@ from income_classifier.adaboost import (  # noqa: E402
     find_splits,
     update_weights,
 )
-from income_classifier.data import load_adult, split_features_target  # noqa: E402
+from income_classifier.data import (  # noqa: E402
+    load_adult,
+    load_adult_official_split,
+    split_features_target,
+)
+from income_classifier.interpret import (  # noqa: E402
+    fairness_slices,
+    tune_threshold,
+)
 from income_classifier.pipeline import make_model_pipeline  # noqa: E402
 
 
@@ -84,3 +92,29 @@ def test_load_adult_and_pipeline_smoke():
     preds = pipe.predict(X_test)
     assert len(preds) == len(y_test)
     assert pipe.score(X_test, y_test) > 0.75
+
+
+def test_official_split_shapes_and_labels():
+    train_df, test_df = load_adult_official_split()
+    assert len(train_df) == 32561
+    assert len(test_df) == 16281
+    assert set(train_df["income"].unique()) == {"<=50K", ">50K"}
+    assert set(test_df["income"].unique()) == {"<=50K", ">50K"}
+
+
+def test_threshold_and_fairness_helpers():
+    y_true = np.array([0, 0, 1, 1, 1, 0, 1, 0])
+    y_proba = np.array([0.1, 0.4, 0.6, 0.9, 0.55, 0.2, 0.7, 0.3])
+    best = tune_threshold(y_true, y_proba, metric="f1")
+    assert 0.0 <= best["threshold"] <= 1.0
+    assert best["f1"] >= 0.0
+
+    X = pd.DataFrame(
+        {
+            "sex": ["Male", "Male", "Female", "Female", "Male", "Female", "Male", "Female"],
+            "race": ["White"] * 8,
+        }
+    )
+    table = fairness_slices(X, y_true, y_proba, attributes=["sex"], threshold=0.5)
+    assert set(table["attribute"]) == {"sex"}
+    assert table["n"].sum() == 8

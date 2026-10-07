@@ -2,7 +2,7 @@
 
 **Predict whether a person earns more than \$50K/year — and understand *how* boosting gets you there.**
 
-This project pairs a **from-scratch AdaBoost implementation** (decision stumps, ε / α weight updates, bootstrap reweighting) with a **modern tabular ML benchmark** on the UCI Adult Census Income dataset. It started as an educational deep-dive into boosting; it now ships as a reproducible package that rivals scikit-learn’s AdaBoost and beats the original feature subset with histogram gradient boosting.
+This project pairs a **from-scratch AdaBoost implementation** (decision stumps, ε / α weight updates, bootstrap reweighting) with a **modern tabular ML toolkit** on the UCI Adult Census Income dataset. It started as an educational deep-dive into boosting; it now ships as a reproducible package with official train/test evaluation, tuning, interpretability, fairness slices, CI, and a small demo app.
 
 <p align="center">
   <img src="figures/benchmark_comparison.png" alt="Model benchmark comparison" width="900" />
@@ -13,23 +13,30 @@ This project pairs a **from-scratch AdaBoost implementation** (decision stumps, 
 | Pillar | What you get |
 |--------|----------------|
 | **Theory you can read** | AdaBoost math implemented in clear Python — not hidden inside a C++ extension |
-| **Parity with sklearn** | Custom AdaBoost ≈ `AdaBoostClassifier` on the same Adult holdout (~85.8% vs ~85.9% accuracy) |
-| **Stronger models** | Full feature set + `HistGradientBoostingClassifier` → **ROC-AUC 0.931**, best F1 for `>50K` |
-| **Portfolio-ready** | Installable package, CLI benchmark, tests, and documentation — not just a notebook dump |
+| **Parity with sklearn** | Custom AdaBoost tracks `AdaBoostClassifier` closely on Adult |
+| **Stronger models** | Full feature set + tuned `HistGradientBoostingClassifier` |
+| **Honest evaluation** | Official UCI `adult.data` / `adult.test` split, not only a random holdout |
+| **Portfolio-ready** | Package, CLI, Streamlit demo, tests, CI, model card, fairness report |
 
-## Headline results
+## Headline results (official UCI test set)
 
-Stratified 80/20 split on `adult.data` (`random_state=42`):
+Train on `adult.data`, evaluate on `adult.test`:
 
 | Model | ROC-AUC | F1 (`>50K`) | Accuracy |
 |-------|---------|-------------|----------|
-| **Hist Gradient Boosting** | **0.931** | **0.720** | 0.835 |
-| Random Forest | 0.921 | 0.713 | 0.837 |
-| AdaBoost (sklearn) | 0.914 | 0.668 | **0.859** |
-| **AdaBoost (from scratch)** | 0.908 | 0.673 | 0.858 |
-| Logistic Regression | 0.907 | 0.682 | 0.808 |
+| **Hist Gradient Boosting** | **0.927** | **0.707** | 0.833 |
+| Random Forest | 0.916 | 0.699 | 0.833 |
+| AdaBoost (sklearn) | 0.910 | 0.650 | **0.857** |
+| AdaBoost (from scratch) | 0.907 | 0.654 | 0.854 |
+| Logistic Regression | 0.903 | 0.671 | 0.806 |
 
-Full metrics and design notes: [`docs/DOCUMENTATION.md`](docs/DOCUMENTATION.md).
+F1 rises to **~0.718** after validation-chosen threshold tuning (`≈0.70` instead of 0.5). Checked-in metrics: [`results/official_benchmark_metrics.csv`](results/official_benchmark_metrics.csv).
+
+Full write-up, permutation importance, and fairness slices: [`docs/DOCUMENTATION.md`](docs/DOCUMENTATION.md) · [`docs/MODEL_CARD.md`](docs/MODEL_CARD.md).
+
+<p align="center">
+  <img src="figures/permutation_importance.png" alt="Permutation importance" width="720" />
+</p>
 
 ## Quickstart
 
@@ -40,24 +47,31 @@ source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 pip install -e .
 
-# 2. Run the full benchmark
-python scripts/run_benchmark.py --output-dir artifacts
+# 2. Official-split benchmark (+ threshold / importance / fairness)
+python scripts/run_benchmark.py --split official --analyze --output-dir artifacts
 
-# 3. Tests
+# 3. Optional: randomized hyperparameter search for HGB
+python scripts/run_benchmark.py --split official --tune hist_gradient_boosting --tune-iter 16 --analyze
+
+# 4. Tests
 pytest -q
+
+# 5. Demo (CLI)
+python scripts/predict_demo.py --example
+
+# 6. Demo (Streamlit UI)
+streamlit run app/streamlit_app.py
 ```
 
 Programmatic use:
 
 ```python
-from income_classifier import make_model_pipeline, load_adult
+from income_classifier import make_model_pipeline, load_adult_official_split
 from income_classifier.data import split_features_target
-from sklearn.model_selection import train_test_split
 
-X, y = split_features_target(load_adult())
-X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.2, stratify=y, random_state=42
-)
+train_df, test_df = load_adult_official_split()
+X_train, y_train = split_features_target(train_df)
+X_test, y_test = split_features_target(test_df)
 
 model = make_model_pipeline("hist_gradient_boosting")
 model.fit(X_train, y_train)
@@ -67,35 +81,39 @@ print(model.score(X_test, y_test))
 ## What’s inside
 
 ```text
-src/income_classifier/     # data → preprocess → models → evaluate
-scripts/run_benchmark.py   # one-command leaderboard + saved artifact
-notebooks/                 # walkthrough + modern benchmark (+ 2020 archive)
-tests/                     # stump math, AdaBoost, pipeline smoke tests
-docs/DOCUMENTATION.md      # algorithms, metrics, API, limitations
-adult.data                 # UCI Adult training dump
+src/income_classifier/     # data, AdaBoost, pipelines, tuning, interpretability
+scripts/run_benchmark.py   # leaderboard + optional --tune / --analyze
+scripts/predict_demo.py    # score one profile or a CSV
+app/streamlit_app.py       # interactive demo
+notebooks/                 # walkthrough + benchmark (+ clearly labeled 2020 archive)
+tests/                     # unit + smoke tests
+.github/workflows/ci.yml   # pytest + logistic smoke on PRs
+docs/DOCUMENTATION.md      # algorithms, metrics, API
+docs/MODEL_CARD.md         # intended use, limitations, ethics
+adult.data / adult.test    # official UCI split
 ```
 
 ### Notebooks
 
-1. [`notebooks/01_adaboost_walkthrough.ipynb`](notebooks/01_adaboost_walkthrough.ipynb) — build stumps and AdaBoost step by step.
-2. [`notebooks/02_modern_benchmark.ipynb`](notebooks/02_modern_benchmark.ipynb) — EDA + package benchmark.
-3. [`notebooks/archive_original_2020.ipynb`](notebooks/archive_original_2020.ipynb) — original exploratory notebook (historical).
+See [`notebooks/README.md`](notebooks/README.md). Start with `01_adaboost_walkthrough.ipynb`. The 2020 notebook is kept only as a **historical archive**.
 
 ## What improved vs the original notebook
 
-1. **Features that matter** — capital gain/loss, marital status, relationship, and native country (not just six hand-picked columns).
-2. **Honest missing data** — `?` treated as missing and imputed inside a `ColumnTransformer` pipeline.
-3. **Fixed stump search** — `find_splits` no longer zeros out candidate thresholds.
-4. **Modern learner** — HistGradientBoosting with early stopping and class balancing.
-5. **Engineering** — package layout, CLI, tests, MIT license, and docs you can share in a portfolio.
+1. **Official train/test protocol** with `adult.test`
+2. **Features that matter** — capital gain/loss, marital status, relationship, native country
+3. **Honest missing data** — `?` imputed inside a `ColumnTransformer`
+4. **Fixed stump search** — `find_splits` no longer zeros out candidate thresholds
+5. **Modern learner + tuning** — HistGradientBoosting with randomized search
+6. **Threshold tuning, permutation importance, fairness slices**
+7. **Engineering** — package, CI, pinned deps, model card, Streamlit demo
 
 ## Dataset
 
-[UCI Adult / Census Income](https://archive.ics.uci.edu/dataset/2/adult) (Kohavi & Becker). Prediction task: `income > 50K` vs `<= 50K`. See `adult.names` for the original codebook and historical baselines (~84–86% accuracy for classical systems after unknown removal).
+[UCI Adult / Census Income](https://archive.ics.uci.edu/dataset/2/adult) (Kohavi & Becker). Prediction task: `income > 50K` vs `<= 50K`. See `adult.names` for the original codebook.
 
 ## Stack
 
-Python 3.10+ · pandas · NumPy · scikit-learn · matplotlib · pytest
+Python 3.10+ · pandas · NumPy · scikit-learn · matplotlib · pytest · streamlit
 
 ## License
 

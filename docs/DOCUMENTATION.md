@@ -93,15 +93,33 @@ Histogram gradient boosting typically wins here because it captures non-linear i
 
 ## 6. Benchmark results
 
-Held-out stratified 20% split of `adult.data` (`random_state=42`). Metrics for the positive class `>50K`:
+### 6.1 Official UCI train/test (default)
+
+Train on `adult.data`, evaluate on `adult.test`. Metrics for the positive class `>50K` are written to `results/official_benchmark_metrics.csv` when you run:
+
+```bash
+python scripts/run_benchmark.py --split official --analyze --output-dir artifacts
+```
+
+### 6.2 Internal holdout (optional)
+
+For quick iteration you can still use a stratified 80/20 split of `adult.data`:
+
+```bash
+python scripts/run_benchmark.py --split holdout --output-dir artifacts
+```
+
+Previous holdout snapshot (for continuity with earlier README numbers):
 
 | Model | Accuracy | Precision | Recall | F1 | ROC-AUC | Avg. Precision |
 |-------|----------|-----------|--------|----|---------|----------------|
-| Hist Gradient Boosting | 0.835 | 0.609 | 0.879 | **0.720** | **0.931** | **0.836** |
-| Random Forest | 0.837 | 0.619 | 0.840 | 0.713 | 0.921 | 0.805 |
-| AdaBoost (sklearn) | **0.859** | **0.771** | 0.590 | 0.668 | 0.914 | 0.798 |
-| AdaBoost (from scratch) | 0.858 | 0.756 | 0.606 | 0.673 | 0.908 | 0.782 |
-| Logistic Regression | 0.808 | 0.567 | 0.855 | 0.682 | 0.907 | 0.770 |
+| Hist Gradient Boosting | 0.833 | 0.602 | 0.858 | **0.707** | **0.927** | **0.824** |
+| Random Forest | 0.833 | 0.609 | 0.818 | 0.699 | 0.916 | 0.793 |
+| AdaBoost (sklearn) | **0.857** | **0.771** | 0.562 | 0.650 | 0.910 | 0.779 |
+| AdaBoost (from scratch) | 0.854 | 0.746 | 0.582 | 0.654 | 0.907 | 0.770 |
+| Logistic Regression | 0.806 | 0.559 | 0.840 | 0.671 | 0.903 | 0.755 |
+
+Threshold tuning on a train validation slice selects ≈0.70 and lifts HGB F1 on `adult.test` from 0.707 → **~0.718**.
 
 ![Benchmark comparison](../figures/benchmark_comparison.png)
 
@@ -121,7 +139,7 @@ python scripts/run_benchmark.py --output-dir artifacts
 
 ```text
 .
-├── adult.data / adult.names     # UCI Adult data + codebook
+├── adult.data / adult.test / adult.names  # official UCI split + codebook
 ├── src/income_classifier/       # Installable package
 │   ├── adaboost.py              # From-scratch AdaBoost + stump utilities
 │   ├── data.py                  # Loading / cleaning
@@ -136,7 +154,8 @@ python scripts/run_benchmark.py --output-dir artifacts
 ├── tests/                       # Unit + smoke tests
 ├── results/benchmark_metrics.csv
 ├── figures/benchmark_comparison.png
-└── docs/DOCUMENTATION.md        # This file
+├── docs/DOCUMENTATION.md        # This file
+└── docs/MODEL_CARD.md           # Intended use / ethics
 ```
 
 ## 8. API quick reference
@@ -171,12 +190,42 @@ Coverage includes stump/split utilities, weight updates, AdaBoost fit/predict on
 
 ## 10. Design choices & limitations
 
-- Only `adult.data` is shipped; results use an internal stratified holdout rather than the official `adult.test` file. Point `--data-path` at another dump if needed.
+- Official `adult.test` is shipped; default evaluation uses that protocol. `--split holdout` remains available for quick iteration.
 - From-scratch AdaBoost uses bootstrap sampling (notebook-faithful). sklearn’s AdaBoost uses sample weights directly on the stump; both are valid AdaBoost variants and land in a similar accuracy band.
 - No fairness auditing is performed. Adult includes protected attributes (`sex`, `race`); deploying income models in real decisions requires separate bias analysis and governance.
 - Hyperparameters are strong defaults, not an exhaustive grid search.
 
-## 11. References
+## 11. Threshold tuning, importance, and fairness
+
+```bash
+python scripts/run_benchmark.py --split official --analyze --output-dir artifacts
+```
+
+Produces:
+
+- `artifacts/analysis_summary.json` — F1-optimal threshold (chosen on a train validation slice) and test metrics at 0.5 vs tuned threshold
+- `results/permutation_importance.csv` + `figures/permutation_importance.png`
+- `results/fairness_slices.csv` — selection rate / TPR / FPR by `sex` and `race`
+
+## 12. Hyperparameter tuning
+
+```bash
+python scripts/run_benchmark.py --split official --tune hist_gradient_boosting --tune-iter 16
+```
+
+Uses stratified `RandomizedSearchCV` (see `income_classifier.tuning`). Best params are saved to `results/tuning_summary.json`.
+
+## 13. Demo surfaces
+
+- CLI: `python scripts/predict_demo.py --example`
+- UI: `streamlit run app/streamlit_app.py`
+
+## 14. CI
+
+GitHub Actions (`.github/workflows/ci.yml`) runs `pytest` and a logistic-regression official-split smoke test on pushes/PRs.
+
+## 15. References
+
 
 - Kohavi, R. (1996). *Scaling Up the Accuracy of Naive-Bayes Classifiers: a Decision-Tree Hybrid.* KDD.
 - Freund, Y. & Schapire, R. (1997). *A Decision-Theoretic Generalization of On-Line Learning and an Application to Boosting.*

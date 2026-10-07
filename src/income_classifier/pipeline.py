@@ -19,6 +19,17 @@ from sklearn.tree import DecisionTreeClassifier
 from .adaboost import SimpleAdaBoost
 from .data import CATEGORICAL_FEATURES, NUMERIC_FEATURES
 
+# Strong defaults from RandomizedSearchCV on adult.data
+# (see results/tuning_summary.json). Kept here so inference stays dependency-light.
+TUNED_HIST_GRADIENT_BOOSTING: dict[str, Any] = {
+    "learning_rate": 0.11787686347935872,
+    "max_depth": None,
+    "max_leaf_nodes": 31,
+    "min_samples_leaf": 20,
+    "l2_regularization": 0.0,
+    "max_iter": 150,
+}
+
 
 def build_preprocessor(
     *,
@@ -87,10 +98,7 @@ def get_estimators(random_state: int = 42) -> dict[str, Any]:
             random_state=random_state,
         ),
         "hist_gradient_boosting": HistGradientBoostingClassifier(
-            max_depth=6,
-            learning_rate=0.08,
-            max_iter=300,
-            l2_regularization=0.1,
+            **TUNED_HIST_GRADIENT_BOOSTING,
             early_stopping=True,
             validation_fraction=0.1,
             n_iter_no_change=20,
@@ -104,6 +112,7 @@ def make_model_pipeline(
     model_name: str,
     *,
     random_state: int = 42,
+    model_params: dict[str, Any] | None = None,
 ) -> Pipeline:
     """Build a full preprocess → model pipeline for ``model_name``."""
     estimators = get_estimators(random_state=random_state)
@@ -111,10 +120,14 @@ def make_model_pipeline(
         known = ", ".join(sorted(estimators))
         raise ValueError(f"Unknown model '{model_name}'. Choose from: {known}")
 
+    model = estimators[model_name]
+    if model_params:
+        model.set_params(**model_params)
+
     scale = model_name == "logistic_regression"
     return Pipeline(
         steps=[
             ("preprocess", build_preprocessor(scale_numeric=scale)),
-            ("model", estimators[model_name]),
+            ("model", model),
         ]
     )

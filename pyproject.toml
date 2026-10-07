@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "income-prediction-classifier"
-version = "1.1.0"
+version = "1.2.0"
 description = "From-scratch AdaBoost and modern ensemble benchmarks on the UCI Adult Census Income dataset."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -35,6 +35,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=7.0", "ipykernel>=6.0", "jupyter>=1.0"]
+demo = ["streamlit>=1.28"]
 
 [project.scripts]
 income-classifier = "income_classifier.train:main"
