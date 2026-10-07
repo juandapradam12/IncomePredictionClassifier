@@ -1,124 +1,118 @@
 # Income Prediction Classifier
 
-**Predict whether a person earns more than \$50K/year — and understand *how* boosting gets you there.**
+Can we tell, from census attributes alone, whether someone earns more than $50K a year — and can we do it without treating boosting as a black box?
 
-This project pairs a **from-scratch AdaBoost implementation** (decision stumps, ε / α weight updates, bootstrap reweighting) with a **modern tabular ML toolkit** on the UCI Adult Census Income dataset. It started as an educational deep-dive into boosting; it now ships as a reproducible package with official train/test evaluation, tuning, interpretability, fairness slices, CI, and a small demo app.
+That is the use case behind this project. Using the [UCI Adult Census Income](https://archive.ics.uci.edu/dataset/2/adult) extract, the repo builds an AdaBoost model from first principles, then compares it with modern tabular learners on the official train/test split.
+
+## The problem
+
+About three in four people in the training data earn **$50K or less**. A model that always predicts the majority class looks “accurate” and still fails the use case.
 
 <p align="center">
-  <img src="figures/benchmark_comparison.png" alt="Model benchmark comparison" width="900" />
+  <img src="figures/class_balance.png" alt="Class balance of income labels" width="560" />
 </p>
 
-## Why this project
+<p align="center"><em>Figure 1.</em> Target imbalance on <code>adult.data</code>. The interesting class is the smaller <code>&gt;50K</code> group, so ranking and F1 matter more than raw accuracy.</p>
 
-| Pillar | What you get |
-|--------|----------------|
-| **Theory you can read** | AdaBoost math implemented in clear Python — not hidden inside a C++ extension |
-| **Parity with sklearn** | Custom AdaBoost tracks `AdaBoostClassifier` closely on Adult |
-| **Stronger models** | Full feature set + tuned `HistGradientBoostingClassifier` |
-| **Honest evaluation** | Official UCI `adult.data` / `adult.test` split, not only a random holdout |
-| **Portfolio-ready** | Package, CLI, Streamlit demo, tests, CI, model card, fairness report |
+Income is not random noise around that base rate. Education, family structure, and capital gains shift the odds in clear ways:
 
-## Headline results (official UCI test set)
+<p align="center">
+  <img src="figures/income_by_education.png" alt="Share earning over 50K by education" width="680" />
+</p>
 
-Train on `adult.data`, evaluate on `adult.test`:
+<p align="center"><em>Figure 2.</em> Share of people earning <code>&gt;50K</code> rises steadily with years of education.</p>
+
+<p align="center">
+  <img src="figures/income_by_marital_status.png" alt="Share earning over 50K by marital status" width="720" />
+</p>
+
+<p align="center"><em>Figure 3.</em> Married civilian spouses show a much higher high-income rate than never-married respondents in this 1994 extract.</p>
+
+<p align="center">
+  <img src="figures/income_by_capital_gain.png" alt="Income mix by capital gain presence" width="560" />
+</p>
+
+<p align="center"><em>Figure 4.</em> Among people with any capital gain, the majority are <code>&gt;50K</code>; without capital gains, most are not. That signal was missing from the original six-feature notebook.</p>
+
+## Approach
+
+1. **AdaBoost from scratch** — decision stumps, weighted error $\varepsilon_t$, stump weight $\alpha_t$, and sample reweighting, implemented so the boosting loop is readable.
+2. **Same task, stronger features** — age, education, hours, occupation, marital status, relationship, capital gain/loss, and related fields (not only the original small subset).
+3. **Honest comparison** — logistic regression, random forest, sklearn AdaBoost, the custom AdaBoost, and histogram gradient boosting, scored on the official `adult.test` set.
+
+The AdaBoost update used in the from-scratch model is:
+
+$$
+\varepsilon_t = \sum_{i=1}^{n} w_t(i)\,\mathbb{1}\{y_i \neq f_t(x_i)\}
+\qquad
+\alpha_t = \frac{1}{2}\ln\frac{1-\varepsilon_t}{\varepsilon_t}
+$$
+
+$$
+\hat{w}_{t+1}(i) = w_t(i)\,e^{-\alpha_t y_i f_t(x_i)}
+\qquad
+w_{t+1}(i) = \frac{\hat{w}_{t+1}(i)}{\sum_j \hat{w}_{t+1}(j)}
+$$
+
+$$
+F(x) = \mathrm{sign}\!\left(\sum_{t=1}^{T} \alpha_t f_t(x)\right)
+$$
+
+## What the models achieve
+
+On the official UCI test set (`adult.data` → train, `adult.test` → test):
 
 | Model | ROC-AUC | F1 (`>50K`) | Accuracy |
 |-------|---------|-------------|----------|
-| **Hist Gradient Boosting** | **0.927** | **0.707** | 0.833 |
+| Hist Gradient Boosting | **0.927** | **0.707** | 0.833 |
 | Random Forest | 0.916 | 0.699 | 0.833 |
 | AdaBoost (sklearn) | 0.910 | 0.650 | **0.857** |
 | AdaBoost (from scratch) | 0.907 | 0.654 | 0.854 |
 | Logistic Regression | 0.903 | 0.671 | 0.806 |
 
-F1 rises to **~0.718** after validation-chosen threshold tuning (`≈0.70` instead of 0.5). Checked-in metrics: [`results/official_benchmark_metrics.csv`](results/official_benchmark_metrics.csv).
-
-Full write-up, permutation importance, and fairness slices: [`docs/DOCUMENTATION.md`](docs/DOCUMENTATION.md) · [`docs/MODEL_CARD.md`](docs/MODEL_CARD.md).
-
 <p align="center">
-  <img src="figures/permutation_importance.png" alt="Permutation importance" width="720" />
+  <img src="figures/benchmark_comparison.png" alt="Model benchmark on adult.test" width="900" />
 </p>
 
-## Quickstart
+<p align="center"><em>Figure 5.</em> Left: ranking quality (ROC-AUC). Right: precision / recall / F1 for the high-income class. Gradient boosting leads on ranking and F1; AdaBoost wins raw accuracy with a more conservative <code>&gt;50K</code> call.</p>
 
-```bash
-# 1. Environment
-python -m venv .venv
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-pip install -e .
+<p align="center">
+  <img src="figures/roc_curves.png" alt="ROC curves on adult.test" width="520" />
+</p>
 
-# 2. Official-split benchmark (+ threshold / importance / fairness)
-python scripts/run_benchmark.py --split official --analyze --output-dir artifacts
+<p align="center"><em>Figure 6.</em> ROC curves on <code>adult.test</code>. The from-scratch AdaBoost sits close to sklearn AdaBoost; histogram gradient boosting pulls ahead.</p>
 
-# 3. Optional: randomized hyperparameter search for HGB
-python scripts/run_benchmark.py --split official --tune hist_gradient_boosting --tune-iter 16 --analyze
+A default 0.5 probability cut is not automatically the right operating point for this use case. Choosing the threshold that maximizes F1 on a validation slice of the training data moves F1 on test from about **0.707 → 0.72**:
 
-# 4. Tests
-pytest -q
+<p align="center">
+  <img src="figures/threshold_tradeoff.png" alt="Precision recall F1 versus threshold" width="720" />
+</p>
 
-# 5. Demo (CLI)
-python scripts/predict_demo.py --example
+<p align="center"><em>Figure 7.</em> As the decision threshold rises, precision for <code>&gt;50K</code> improves and recall falls. The orange line marks the F1-optimal cut for the best model.</p>
 
-# 6. Demo (Streamlit UI)
-streamlit run app/streamlit_app.py
-```
+## What drives the prediction
 
-Programmatic use:
+<p align="center">
+  <img src="figures/permutation_importance.png" alt="Permutation importance of features" width="720" />
+</p>
 
-```python
-from income_classifier import make_model_pipeline, load_adult_official_split
-from income_classifier.data import split_features_target
+<p align="center"><em>Figure 8.</em> Permutation importance on <code>adult.test</code>: shuffling marital status or capital gain hurts ROC-AUC the most, followed by age and education. That matches the exploratory patterns above.</p>
 
-train_df, test_df = load_adult_official_split()
-X_train, y_train = split_features_target(train_df)
-X_test, y_test = split_features_target(test_df)
+## A fairness check on the same use case
 
-model = make_model_pipeline("hist_gradient_boosting")
-model.fit(X_train, y_train)
-print(model.score(X_test, y_test))
-```
+Adult includes protected attributes. The point here is transparency for the case study, not a claim that the model is deployable:
 
-## What’s inside
+<p align="center">
+  <img src="figures/fairness_by_sex.png" alt="Selection rate and recall by sex" width="780" />
+</p>
 
-```text
-src/income_classifier/     # data, AdaBoost, pipelines, tuning, interpretability
-scripts/run_benchmark.py   # leaderboard + optional --tune / --analyze
-scripts/predict_demo.py    # score one profile or a CSV
-app/streamlit_app.py       # interactive demo
-notebooks/                 # walkthrough + benchmark (+ clearly labeled 2020 archive)
-tests/                     # unit + smoke tests
-.github/workflows/ci.yml   # pytest + logistic smoke on PRs
-docs/DOCUMENTATION.md      # algorithms, metrics, API
-docs/MODEL_CARD.md         # intended use, limitations, ethics
-adult.data / adult.test    # official UCI split
-```
+<p align="center"><em>Figure 9.</em> On <code>adult.test</code>, men are predicted <code>&gt;50K</code> more often and true high-income men are recovered at a higher rate than women. Any real-world income decisioning would need a separate fairness and governance review.</p>
 
-### Notebooks
+## Where to go next in the repo
 
-See [`notebooks/README.md`](notebooks/README.md). Start with `01_adaboost_walkthrough.ipynb`. The 2020 notebook is kept only as a **historical archive**.
+- Narrative write-up with the same plots and equations: [`docs/DOCUMENTATION.md`](docs/DOCUMENTATION.md)
+- AdaBoost walkthrough notebook: [`notebooks/01_adaboost_walkthrough.ipynb`](notebooks/01_adaboost_walkthrough.ipynb)
+- Package code: [`src/income_classifier/`](src/income_classifier/)
+- Checked-in metrics: [`results/`](results/)
 
-## What improved vs the original notebook
-
-1. **Official train/test protocol** with `adult.test`
-2. **Features that matter** — capital gain/loss, marital status, relationship, native country
-3. **Honest missing data** — `?` imputed inside a `ColumnTransformer`
-4. **Fixed stump search** — `find_splits` no longer zeros out candidate thresholds
-5. **Modern learner + tuning** — HistGradientBoosting with randomized search
-6. **Threshold tuning, permutation importance, fairness slices**
-7. **Engineering** — package, CI, pinned deps, model card, Streamlit demo
-
-## Dataset
-
-[UCI Adult / Census Income](https://archive.ics.uci.edu/dataset/2/adult) (Kohavi & Becker). Prediction task: `income > 50K` vs `<= 50K`. See `adult.names` for the original codebook.
-
-## Stack
-
-Python 3.10+ · pandas · NumPy · scikit-learn · matplotlib · pytest · streamlit
-
-## License
-
-MIT — see [`LICENSE`](LICENSE).
-
-## Author
-
-**Juan David Prada Malagon** — data science / ML engineering.
+**Juan David Prada Malagon**
